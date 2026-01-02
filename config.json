@@ -1,0 +1,7 @@
+{
+  "servo1offset": 12.0,
+  "servo2offset": -7.0,
+  "servo3offset":8.0,
+  "htmlConfig": "<html><head><title>Camera Feed</title><style>body{margin:0;background:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:Arial,sans-serif;}#feed-container{width:1024px;height:1024px;overflow:hidden;border:2px solid #444;border-radius:8px;box-shadow:0 0 20px rgba(0,0,0,0.2);position:relative;background:white;}#feed-container img{width:100%;height:100%;object-fit:cover;}</style></head><body><div id='feed-container'><img src='/raw_feed'></div></body></html>"
+}
+
