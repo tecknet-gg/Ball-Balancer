@@ -14,7 +14,7 @@ class Kinematics:
         print(f"Kinematics initialized.")
 
     def getPoseVector(self, rollDeg, pitchDeg):
-        rollRad = math.radians(max(min(rollDeg, self.maxTiltLimit), -self.maxTiltLimit)) #claming values
+        rollRad = math.radians(max(min(rollDeg, self.maxTiltLimit), -self.maxTiltLimit)) #clamping values
         pitchRad = math.radians(max(min(pitchDeg, self.maxTiltLimit), -self.maxTiltLimit))
 
         alpha = math.sin(pitchRad)
@@ -48,7 +48,7 @@ class Kinematics:
             dist = math.sqrt(distSq)
 
             if dist > (self.lServo + self.lRod) or dist < abs(self.lServo - self.lRod): #checks if reachable
-                print(f"Leg {i + 1} out of reach!")
+                print(f"Leg {i + 1} out of reach.")
                 return [None, None, None]
 
             phiBase = math.atan2(q, p) #angle calculation

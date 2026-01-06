@@ -5,8 +5,7 @@ from flask import Flask, Response
 from threading import Thread
 
 class Camera:
-    def __init__(self, htmlConfig, size=(480, 480), fps=60,
-                 host="0.0.0.0", port=5000, route="/raw_feed"):
+    def __init__(self, htmlConfig, size=(480, 480), fps=60, host="0.0.0.0", port=5000, route="/raw_feed"):
 
         self.camera = Picamera2()
         self.size = size
@@ -31,6 +30,7 @@ class Camera:
     def generateFrame(self):
         delay = 1 / self.fps
         while True:
+            startTime = time.time()
             frame = self.camera.capture_array()
 
             ret, buffer = cv.imencode('.jpg', frame, [cv.IMWRITE_JPEG_QUALITY, 70])
@@ -39,14 +39,9 @@ class Camera:
 
             frameBytes = buffer.tobytes()
 
-            yield (b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n"
-                b"Content-Length: " + str(len(frameBytes)).encode() + b"\r\n\r\n"
-                + frameBytes +
-                b"\r\n"
-            )
+            yield (b"--frame\r\n"b"Content-Type: image/jpeg\r\n"b"Content-Length: " + str(len(frameBytes)).encode() + b"\r\n\r\n" + frameBytes + b"\r\n")
 
-            elapsed = time.time() - time.time()
+            elapsed = time.time() - startTime
             time.sleep(max(0, delay - elapsed))
 
     def startFeed(self):

@@ -31,7 +31,7 @@ class Balancer:
         with open("config.json", "r") as f:
             config = json.load(f)
 
-        self.servoOffsets = [config[f"servo{i + 1}offset"] for i in range(3)]
+        self.servoOffsets = [config[f"servo{i+1}offset"] for i in range(3)]
         print(self.servoOffsets)
 
         self.htmlconfig = config.get("htmlConfig", "<html><body><h1>Camera Feed</h1></body></html>")
@@ -158,7 +158,7 @@ class Balancer:
 
             self.home(0.1)
 
-    def startListener(self, url="http://Jeevans-Mac.local:5001/coordinates", pollInterval=0.05):
+    def startListener(self, url="http://Jeevans-Mac.local:5001/coordinates", pollInterval=0.05): #host name of processing computer
         def listener():
             print("Starting listener...")
             while True:

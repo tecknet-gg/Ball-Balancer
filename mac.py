@@ -13,7 +13,7 @@ hsvLow = np.array([hLow, sLow, vLow])
 hsvHigh = np.array([hHigh, sHigh, vHigh])
 
 app = Flask(__name__) #flask stuff
-url = "http://pizero2.local:5000/raw_feed"
+url = "http://pizero2.local:5000/raw_feed" #host name of onboard computer
 
 
 ballCenter = None #defined globally so it can be read by threads
@@ -39,27 +39,37 @@ def processFrame(frame):
     currentTime = time.time()
     dt = currentTime - lastFrameTime
     lastFrameTime = currentTime
+
     if frame is None: return frame
     h, w = frame.shape[:2]
+
     maskRoi = np.zeros((h, w), dtype=np.uint8)
     cv2.rectangle(maskRoi, (vertBar[0], vertBar[1]), (vertBar[0] + vertBar[2], vertBar[1] + vertBar[3]), 255, -1)
     cv2.rectangle(maskRoi, (horizBar[0], horizBar[1]), (horizBar[0] + horizBar[2], horizBar[1] + horizBar[3]), 255, -1)
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     maskedGray = cv2.bitwise_and(gray, maskRoi)
     blurred = cv2.medianBlur(maskedGray, 3)
+
     circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 60, param1=50, param2=22, minRadius=80, maxRadius=120)
+
     detectedThisFrame = False
     if circles is not None:
+
         circles = np.uint16(np.around(circles))
         hsvFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
         for circle in circles[0, :]:
             cx, cy, r = circle
             if 0 <= cy < h and 0 <= cx < w:
                 sampleColor = hsvFrame[cy, cx] #swatching centre of deteced thing
                 isWhite = (hsvLow[0] <= sampleColor[0] <= hsvHigh[0] and hsvLow[1] <= sampleColor[1] <= hsvHigh[1] and hsvLow[2] <= sampleColor[2] <= hsvHigh[2])
+
                 if not isWhite:
+
                     newCenter = np.array([cx, cy], dtype=float)
                     detectedThisFrame = True
+
                     if lastKnownCenter is not None and dt > 0:
                         diff = newCenter - np.array(lastKnownCenter)
                         distMoved = np.linalg.norm(diff)
@@ -67,24 +77,32 @@ def processFrame(frame):
                         newCenter = newCenter if distMoved >= 2.5 else np.array(lastKnownCenter)
                         velocity = (0.95 * velocity) + (0.05 * instantV)
                         if np.linalg.norm(velocity) < 7.0: velocity = np.array([0.0, 0.0])
-                    if emaCenter is None: emaCenter = newCenter
+
+                    if emaCenter is None:
+                        emaCenter = newCenter
+
                     else:
                         speed = np.linalg.norm(velocity)
-                        dynamicAlpha = np.clip(0.30 + (speed / 1000), 0.30, 0.8)
+                        dynamicAlpha = np.clip(0.30 + (speed / 1000), 0.30, 0.8) # gives an alpha for the ema based on how fast the ball is already moving
                         emaCenter = (dynamicAlpha * newCenter) + ((1 - dynamicAlpha) * emaCenter)
                     newEmaX, newEmaY = int(emaCenter[0]), int(emaCenter[1])
-                    if ballCenter is None or (abs(newEmaX - ballCenter[0]) >= 1 or abs(newEmaY - ballCenter[1]) >= 1): ballCenter = (newEmaX, newEmaY)
+
+                    if ballCenter is None or (abs(newEmaX - ballCenter[0]) >= 1 or abs(newEmaY - ballCenter[1]) >= 1):
+                        ballCenter = (newEmaX, newEmaY)
                     lastKnownCenter = (int(newCenter[0]), int(newCenter[1]))
                     missingFrames, isLocked = 0, True
                     cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
                     break
+
     if not detectedThisFrame:
         missingFrames += 1
         cv2.putText(frame,f"No Ball", (20, 20),cv2.FONT_HERSHEY_SIMPLEX, 0.6,(0,0,255),2,cv2.LINE_AA)
         if missingFrames > 10: isLocked, ballCenter, emaCenter, velocity = False, None, None, np.array([0.0, 0.0])
+
     cv2.rectangle(frame, (vertBar[0], vertBar[1]), (vertBar[0] + vertBar[2], vertBar[1] + vertBar[3]), (255, 255, 255), 1)
     cv2.rectangle(frame, (horizBar[0], horizBar[1]), (horizBar[0] + horizBar[2], horizBar[1] + horizBar[3]), (255, 255, 255), 1)
     cv2.drawMarker(frame, (int(w/2), int(h/2)), (255, 0, 0), cv2.MARKER_CROSS, 15, 2)
+
     if emaCenter is not None:
         speed = np.linalg.norm(velocity)
         cv2.drawMarker(frame, (int(emaCenter[0]), int(emaCenter[1])), (0, 0, 255), cv2.MARKER_CROSS, 15, 2)
@@ -92,7 +110,9 @@ def processFrame(frame):
         cv2.putText(frame,f" Speed: {speed}", (0, 700),cv2.FONT_HERSHEY_SIMPLEX, 0.6,(255,0,0),2,cv2.LINE_AA)
 
         relCenter = (float(emaCenter[0] - w / 2), float(-(emaCenter[1] - h / 2)))
+
     return frame
+
 @app.route("/coordinates")
 def coordinatesNew():
     global lastFrameTime, relCenter, velocity, missingFrames
