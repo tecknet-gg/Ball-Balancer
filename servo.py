@@ -19,7 +19,7 @@ class Servo:
     def angleToCount(self, angle):
         pulse = self.MIN_PULSE + (angle / self.MAX_ANGLE) * (self.MAX_PULSE - self.MIN_PULSE) #we love linear interpolation
         count12bit = int((pulse / self.PERIOD) * 4096) #native 12bit count for PCA9685 (C++)
-        count16bit = count12bit * 16 #convert count to 16bit for Adafruit PWM library (API is in 16bit for whatever reason)
+        count16bit = count12bit * 16 #convert count to 16bit for Adafruit PWM library (API is in 16bit)
         return count16bit
 
     def setAngle(self, angle):

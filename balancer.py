@@ -35,7 +35,8 @@ class Balancer:
         print(self.servoOffsets)
 
         self.htmlconfig = config.get("htmlConfig", "<html><body><h1>Camera Feed</h1></body></html>")
-        self.servo1 = Servo(channel1, self.servoOffsets[0], self.pwm)
+
+        self.servo1 = Servo(channel1, self.servoOffsets[0], self.pwm) #setting default offsets
         self.servo2 = Servo(channel2, self.servoOffsets[1], self.pwm)
         self.servo3 = Servo(channel3, self.servoOffsets[2], self.pwm)
         self.servos = [self.servo1, self.servo2, self.servo3]
@@ -54,7 +55,7 @@ class Balancer:
 
         self.camera = Camera(self.htmlconfig, (720, 720), 120)
 
-    def manualCallibrate(self):
+    def manualCallibrate(self): #callibrate manually using callibrate.py
         while True:
             result = callibrate(self.servoOffsets)
             if result == False:
@@ -66,32 +67,30 @@ class Balancer:
                 self.servo3.updateOffset(self.servoOffsets[2])
                 self.home()
 
-
-
-    def testKinematics(self, roll, pitch):
+    def testKinematics(self, roll, pitch): #testing the maths
         angles = self.kinematics.calculate(roll,pitch)
         print(f"Angles: {angles}")
         self.setAngles(angles)
 
     def setAngles(self, angles):
         servos = [self.servo1, self.servo2, self.servo3]
-        for servo, angle in zip(servos, angles):
+        for servo, angle in zip(servos, angles): #associate each servo with each angle
             servo.setAngle(angle)
 
     def setAngle(self, servoNumber, angle):
         servo = [self.servo1, self.servo2, self.servo3][servoNumber - 1]
         servo.setAngle(angle)
 
-    def sweepServo(self, servoNumber, startAngle, endAngle, stepAngle, toStart=False, delay=0.01):
+    def sweepServo(self, servoNumber, startAngle, endAngle, stepAngle, toStart=False, delay=0.01): #ooh default parameters
         servo = [self.servo1, self.servo2, self.servo3][servoNumber - 1]
         servo.sweep(startAngle, endAngle, stepAngle, toStart, delay)
 
-    def sweepAll(self, startAngle, endAngle, stepAngle, toStart=False, delay=0.01):
+    def sweepAll(self, startAngle, endAngle, stepAngle, toStart=False, delay=0.01): #should probaly wrap setAll and sweepAll into the single arguement functions
         self.sweepServo(1, startAngle, endAngle, stepAngle, toStart, delay)
         self.sweepServo(2, startAngle, endAngle, stepAngle, toStart, delay)
         self.sweepServo(3, startAngle, endAngle, stepAngle, toStart, delay)
 
-    def home(self,delay=1):
+    def home(self,delay=1): #going to the mathematical home position
         angles = self.kinematics.calculate(0,0)
         theta1, theta2, theta3 = angles
         theta1 + self.servo1.offset
@@ -101,13 +100,13 @@ class Balancer:
         self.setAngles(angles)
         time.sleep(1)
 
-    def manualControl(self):
+    def manualControl(self): #send manual control commands -> move and refactor into callibrate.py?
         while True:
             motor = int(input("Enter motor number (1-3): "))
             angle = int(input("Enter angle (-180 to 180): "))
             self.setAngle(motor, angle)
 
-    def waveMotion(self, duration=10, steps=100, amplitude=45, offsets=[0, 0, 0]):
+    def waveMotion(self, duration=10, steps=100, amplitude=45, offsets=[0, 0, 0]): #sine wave :]
         startTime = time.time()
         servos = [self.servo1, self.servo2, self.servo3]
         while time.time() - startTime < duration:
@@ -121,7 +120,7 @@ class Balancer:
                 self.setAngles(angles)
                 time.sleep(0.02)
 
-    def autoCallibrate(self):
+    def autoCallibrate(self): #gradient-descent(-ish) homing. doesn't really take into account IMU inaccuracies
         print("Starting Auto-Calibration...")
         pitchTolerance = 0.3
         rollTolerance = 0.3
@@ -137,7 +136,7 @@ class Balancer:
             roll, pitch = self.imu.getOrientation()
             errorR = abs(roll - self.restingRoll)
             errorP = abs(pitch - self.restingPitch)
-            step = stepSmall if (errorR < 1 and errorP < 1) else stepNormal
+            step = stepSmall if (errorR < 1 and errorP < 1) else stepNormal #dynamicStep = min(0.5,0+error*0.1) or something similar for more dynamic step size
             step = stepLarge if errorR > 4 else stepNormal
             print(f"Roll: {roll:.2f}, Pitch: {pitch:.2f} Step: {step:.2f}")
             if roll < self.restingRoll + rollTolerance and roll > self.restingRoll - rollTolerance and pitch < self.restingPitch + pitchTolerance and pitch > self.restingPitch - pitchTolerance:
@@ -145,7 +144,7 @@ class Balancer:
                 print(f"Servo Offsets: {self.servo1.offset, self.servo2.offset, self.servo3.offset}")
                 break
             if pitch > 0:
-                self.servo1.updateOffset(self.servo1.offset - step)
+                self.servo1.updateOffset(self.servo1.offset - step) #primary actuator set as servo 1
             elif pitch < 0:
                 self.servo1.updateOffset(self.servo1.offset + step)
 
@@ -175,7 +174,7 @@ class Balancer:
         thread = threading.Thread(target=listener, daemon=True)
         thread.start()
 
-    def orientation(self):
+    def orientation(self): #heper functions
         while True:
             print(self.imu.getOrientation())
 
@@ -184,7 +183,7 @@ class Balancer:
             time.sleep(0.01)
             print("Idling")
 
-    def balance(self,hz=20):
+    def balance(self,hz=20): #main control loop
         self.startListener()
         delay = 1 / hz
         while True:

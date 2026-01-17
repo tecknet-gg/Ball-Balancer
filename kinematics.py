@@ -48,7 +48,7 @@ class Kinematics:
             dist = math.sqrt(distSq)
 
             if dist > (self.lServo + self.lRod) or dist < abs(self.lServo - self.lRod): #checks if reachable
-                print(f"Leg {i + 1} out of reach.")
+                print(f"Leg {i + 1} out of reach.c")
                 return [None, None, None]
 
             phiBase = math.atan2(q, p) #angle calculation
