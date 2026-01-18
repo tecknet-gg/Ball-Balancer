@@ -5,7 +5,7 @@ from flask import Flask, Response
 from threading import Thread
 
 class Camera:
-    def __init__(self, htmlConfig, size=(480, 480), fps=60, host="0.0.0.0", port=5000, route="/raw_feed"):
+    def __init__(self, htmlConfig, size=(480, 480), fps=120, host="0.0.0.0", port=5000, route="/raw_feed"):
 
         self.camera = Picamera2()
         self.size = size

@@ -157,7 +157,7 @@ class Balancer:
 
             self.home(0.1)
 
-    def startListener(self, url="http://Jeevans-Mac.local:5001/coordinates", pollInterval=0.05): #host name of processing computer
+    def startListener(self, url="http://192.168.1.107:5001/coordinates", pollInterval=0.05): #host name of processing computer
         def listener():
             print("Starting listener...")
             while True:

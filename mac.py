@@ -6,17 +6,14 @@ import cv2
 import numpy as np
 import time
 
-hLow, sLow, vLow = 120, 10, 180    # lower bounds
-hHigh, sHigh, vHigh = 160, 80, 255  # upper bounds
+# Ball colour
+hsvLow = np.array([130, 40, 40])
+hsvHigh = np.array([179, 255, 220])
 
-hsvLow = np.array([hLow, sLow, vLow])
-hsvHigh = np.array([hHigh, sHigh, vHigh])
+app = Flask(__name__)
+url = "http://192.168.3.58:5000/raw_feed"
 
-app = Flask(__name__) #flask stuff
-url = "http://pizero2.local:5000/raw_feed" #host name of onboard computer
-
-
-ballCenter = None #defined globally so it can be read by threads
+ballCenter = None
 relCenter = None
 lastKnownCenter = None
 missingFrames = 0
@@ -28,89 +25,109 @@ lastFrameTime = time.time()
 
 latestRaw = None
 latestProcessed = None
+latestBlurred = None
 frameLock = threading.Lock()
 
 vertBar = [60, 10, 650, 750]
 horizBar = [0, 190, 750, 320]
+searchWindow = None
 
 
 def processFrame(frame):
-    global ballCenter, lastKnownCenter, missingFrames, emaCenter, isLocked, velocity, lastFrameTime, relCenter
+    global ballCenter, lastKnownCenter, missingFrames, emaCenter, isLocked, velocity, lastFrameTime, relCenter, latestBlurred, searchWindow
     currentTime = time.time()
-    dt = currentTime - lastFrameTime
+    deltaTime = currentTime - lastFrameTime
     lastFrameTime = currentTime
 
-    if frame is None: return frame
-    h, w = frame.shape[:2]
+    if frame is None:
+        return frame
 
-    maskRoi = np.zeros((h, w), dtype=np.uint8)
+    height, width = frame.shape[:2]
+
+    maskRoi = np.zeros((height, width), dtype=np.uint8)
     cv2.rectangle(maskRoi, (vertBar[0], vertBar[1]), (vertBar[0] + vertBar[2], vertBar[1] + vertBar[3]), 255, -1)
     cv2.rectangle(maskRoi, (horizBar[0], horizBar[1]), (horizBar[0] + horizBar[2], horizBar[1] + horizBar[3]), 255, -1)
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    maskedGray = cv2.bitwise_and(gray, maskRoi)
-    blurred = cv2.medianBlur(maskedGray, 3)
+    if isLocked and ballCenter is not None:
+        winSize = 400
+        x1 = max(0, ballCenter[0] - winSize // 2)
+        y1 = max(0, ballCenter[1] - winSize // 2)
+        x2 = min(width, ballCenter[0] + winSize // 2)
+        y2 = min(height, ballCenter[1] + winSize // 2)
 
-    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 60, param1=50, param2=22, minRadius=80, maxRadius=120)
+        searchMask = np.zeros((height, width), dtype=np.uint8)
+        cv2.rectangle(searchMask, (x1, y1), (x2, y2), 255, -1)
+        maskRoi = cv2.bitwise_and(maskRoi, searchMask)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 1)
 
+    grayFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    maskedGray = cv2.bitwise_and(grayFrame, maskRoi)
+    blurredFrame = cv2.medianBlur(maskedGray, 3)
+
+    _, encodedBlurred = cv2.imencode(".jpg", blurredFrame)
+    with frameLock:
+        latestBlurred = encodedBlurred.tobytes()
+
+    detectedCircles = cv2.HoughCircles(blurredFrame, cv2.HOUGH_GRADIENT, 1.2, 60,param1=50, param2=18, minRadius=80, maxRadius=100)
     detectedThisFrame = False
-    if circles is not None:
 
-        circles = np.uint16(np.around(circles))
+    if detectedCircles is not None:
+        detectedCircles = np.uint16(np.around(detectedCircles))
         hsvFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        for circle in circles[0, :]:
-            cx, cy, r = circle
-            if 0 <= cy < h and 0 <= cx < w:
-                sampleColor = hsvFrame[cy, cx] #swatching centre of deteced thing
-                isWhite = (hsvLow[0] <= sampleColor[0] <= hsvHigh[0] and hsvLow[1] <= sampleColor[1] <= hsvHigh[1] and hsvLow[2] <= sampleColor[2] <= hsvHigh[2])
+        for circle in detectedCircles[0, :]:
+            centerX, centerY, radius = circle
+            if 0 <= centerY < height and 0 <= centerX < width:
+                sampleRadius = 5
+                sy1, sy2 = max(0, centerY - sampleRadius), min(height, centerY + sampleRadius)
+                sx1, sx2 = max(0, centerX - sampleRadius), min(width, centerX + sampleRadius)
 
-                if not isWhite:
+                if sy2 > sy1 and sx2 > sx1:
+                    sampleRegion = hsvFrame[sy1:sy2, sx1:sx2]
+                    orangeMask = cv2.inRange(sampleRegion, hsvLow, hsvHigh)
+                    orangePercent = np.count_nonzero(orangeMask) / orangeMask.size
 
-                    newCenter = np.array([cx, cy], dtype=float)
-                    detectedThisFrame = True
+                    if orangePercent > 0.2:
+                        newCenter = np.array([centerX, centerY], dtype=float)
+                        detectedThisFrame = True
 
-                    if lastKnownCenter is not None and dt > 0:
-                        diff = newCenter - np.array(lastKnownCenter)
-                        distMoved = np.linalg.norm(diff)
-                        instantV = diff / dt if distMoved >= 2.5 else np.array([0.0, 0.0])
-                        newCenter = newCenter if distMoved >= 2.5 else np.array(lastKnownCenter)
-                        velocity = (0.95 * velocity) + (0.05 * instantV)
-                        if np.linalg.norm(velocity) < 7.0: velocity = np.array([0.0, 0.0])
+                        if lastKnownCenter is not None and deltaTime > 0:
+                            diffVector = newCenter - np.array(lastKnownCenter)
+                            distanceMoved = np.linalg.norm(diffVector)
+                            instantVelocity = diffVector / deltaTime if distanceMoved >= 2.5 else np.array([0.0, 0.0])
+                            velocity = (0.90 * velocity) + (0.10 * instantVelocity)
 
-                    if emaCenter is None:
-                        emaCenter = newCenter
+                        if emaCenter is None:
+                            emaCenter = newCenter
+                        else:
+                            currentSpeed = np.linalg.norm(velocity)
+                            dynamicAlpha = np.clip(0.35 + (currentSpeed / 1000), 0.35, 0.8)
+                            emaCenter = (dynamicAlpha * newCenter) + ((1 - dynamicAlpha) * emaCenter)
 
-                    else:
-                        speed = np.linalg.norm(velocity)
-                        dynamicAlpha = np.clip(0.30 + (speed / 1000), 0.30, 0.8) # gives an alpha for the ema based on how fast the ball is already moving
-                        emaCenter = (dynamicAlpha * newCenter) + ((1 - dynamicAlpha) * emaCenter)
-                    newEmaX, newEmaY = int(emaCenter[0]), int(emaCenter[1])
-
-                    if ballCenter is None or (abs(newEmaX - ballCenter[0]) >= 1 or abs(newEmaY - ballCenter[1]) >= 1):
-                        ballCenter = (newEmaX, newEmaY)
-                    lastKnownCenter = (int(newCenter[0]), int(newCenter[1]))
-                    missingFrames, isLocked = 0, True
-                    cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
-                    break
+                        ballCenter = (int(emaCenter[0]), int(emaCenter[1]))
+                        lastKnownCenter = (int(newCenter[0]), int(newCenter[1]))
+                        missingFrames, isLocked = 0, True
+                        cv2.circle(frame, (centerX, centerY), radius, (0, 255, 0), 2)
+                        break
 
     if not detectedThisFrame:
         missingFrames += 1
-        cv2.putText(frame,f"No Ball", (20, 20),cv2.FONT_HERSHEY_SIMPLEX, 0.6,(0,0,255),2,cv2.LINE_AA)
-        if missingFrames > 10: isLocked, ballCenter, emaCenter, velocity = False, None, None, np.array([0.0, 0.0])
+        if isLocked and missingFrames > 1:
+            isLocked = False
+            ballCenter = None
+
+        cv2.putText(frame, f"Searching Field ({missingFrames})", (20, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        if missingFrames > 5:
+            emaCenter, velocity = None, np.array([0.0, 0.0])
 
     cv2.rectangle(frame, (vertBar[0], vertBar[1]), (vertBar[0] + vertBar[2], vertBar[1] + vertBar[3]), (255, 255, 255), 1)
     cv2.rectangle(frame, (horizBar[0], horizBar[1]), (horizBar[0] + horizBar[2], horizBar[1] + horizBar[3]), (255, 255, 255), 1)
-    cv2.drawMarker(frame, (int(w/2), int(h/2)), (255, 0, 0), cv2.MARKER_CROSS, 15, 2)
 
     if emaCenter is not None:
-        speed = np.linalg.norm(velocity)
         cv2.drawMarker(frame, (int(emaCenter[0]), int(emaCenter[1])), (0, 0, 255), cv2.MARKER_CROSS, 15, 2)
-        cv2.putText(frame,f"Detected Ball", (20, 20),cv2.FONT_HERSHEY_SIMPLEX, 0.6,(0,255,0),2,cv2.LINE_AA)
-        cv2.putText(frame,f" Speed: {speed}", (0, 700),cv2.FONT_HERSHEY_SIMPLEX, 0.6,(255,0,0),2,cv2.LINE_AA)
-
-        relCenter = (float(emaCenter[0] - w / 2), float(-(emaCenter[1] - h / 2)))
-
+        relCenter = (float(emaCenter[0] - width / 2), float(-(emaCenter[1] - height / 2)))
     return frame
 
 @app.route("/coordinates")
@@ -126,12 +143,10 @@ def coordinatesNew():
 
 def fetchRaw():
     global latestRaw, latestProcessed
-    print("Connecting to:", url)
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
         buffer = b""
         boundary = b"--frame"
-
         for chunk in r.iter_content(chunk_size=4096):
             if not chunk: continue
             buffer += chunk
@@ -140,26 +155,17 @@ def fetchRaw():
                 if start == -1: break
                 headerEnd = buffer.find(b"\r\n\r\n", start)
                 if headerEnd == -1: break
-
                 headers = buffer[start:headerEnd].decode(errors="ignore")
                 dataStart = headerEnd + 4
                 contentLength = None
                 for line in headers.split("\r\n"):
                     if "Content-Length" in line:
                         contentLength = int(line.split(":")[1].strip())
-
-                if contentLength is None:
-                    buffer = buffer[dataStart:]
-                    break
-                if len(buffer) < dataStart + contentLength:
-                    break
-
+                if contentLength is None or len(buffer) < dataStart + contentLength: break
                 jpg = buffer[dataStart:dataStart + contentLength]
                 buffer = buffer[dataStart + contentLength:]
-
                 with frameLock:
                     latestRaw = jpg
-
                 npImg = np.frombuffer(jpg, dtype=np.uint8)
                 img = cv2.imdecode(npImg, cv2.IMREAD_COLOR)
                 if img is not None:
@@ -167,18 +173,20 @@ def fetchRaw():
                     _, enc = cv2.imencode(".jpg", processed)
                     with frameLock:
                         latestProcessed = enc.tobytes()
+
 def mjpegGenerator(source):
     while True:
         with frameLock:
             frame = source()
         if frame is not None:
-            yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
-                    + frame +
-                    b"\r\n")
+            yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n"
+                   b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
+                   + frame + b"\r\n")
         time.sleep(0.01)
+
+@app.route("/blurred")
+def blurredProxy():
+    return Response(mjpegGenerator(lambda: latestBlurred), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/rawproxy")
 def rawProxy():
@@ -187,14 +195,6 @@ def rawProxy():
 @app.route("/processed")
 def processedProxy():
     return Response(mjpegGenerator(lambda: latestProcessed), mimetype="multipart/x-mixed-replace; boundary=frame")
-@app.route("/coordinatesold")
-def coordinatesProxy():
-    with frameLock:
-        center = relCenter
-    if center is None:
-        return jsonify({"x": 0, "y": 0, "detected": False})
-    return jsonify({"x": int(center[0]), "y": int(center[1]), "detected": True})
-
 
 if __name__ == "__main__":
     threading.Thread(target=fetchRaw, daemon=True).start()
