@@ -7,7 +7,6 @@ from adafruit_pca9685 import PCA9685
 from servo import Servo
 from imu import IMU
 import math
-import threading
 from pid import PID
 from flask import Flask, request, jsonify
 import logging
@@ -15,12 +14,17 @@ from camera import Camera
 from callibrate import callibrate
 import requests
 from kinematics import Kinematics
+import socket  # Add this
+import json
+import threading
 
 class Balancer:
     def __init__(self, channel1 = 13, channel2 = 14, channel3 = 15):
         print("Starting balancer...")
         self.pwm = PCA9685(busio.I2C(board.SCL, board.SDA))
         self.pwm.frequency = 50
+
+        self.pid = PID()
 
         self.kinematics = Kinematics()
 
@@ -98,7 +102,7 @@ class Balancer:
         theta3 + self.servo3.offset
         angles = [theta1, theta2, theta3]
         self.setAngles(angles)
-        time.sleep(1)
+        time.sleep(delay)
 
     def manualControl(self): #send manual control commands -> move and refactor into callibrate.py?
         while True:
@@ -157,20 +161,63 @@ class Balancer:
 
             self.home(0.1)
 
-    def startListener(self, url="http://192.168.1.107:5001/coordinates", pollInterval=0.05): #host name of processing computer
+    def startListener(self, port=5005):
         def listener():
-            print("Starting listener...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("0.0.0.0", port))
+            print(f"UDP listener on port: {port}")
+
             while True:
                 try:
-                    r = requests.get(url, timeout=0.2)
-                    if r.ok:
-                        data = r.json()
-                        with self.lock:
-                            self.coordinates = data
+                    data, addr = sock.recvfrom(1024)
+                    decoded = json.loads(data.decode())
+                    with self.lock:
+                        self.coordinates = decoded
                 except Exception as e:
+                    print(f"Listener Error: {e}")
                     with self.lock:
                         self.coordinates = None
-                time.sleep(pollInterval)
+        thread = threading.Thread(target=listener, daemon=True)
+        thread.start()
+
+    def calculateMotorAngles(self, x, y, velX, velY):
+        poseX, poseY = self.pid.calculatePose(x, y, velX, velY)
+        motorAngles = self.kinematics.calculate(poseX, poseY)
+        return motorAngles
+
+    def startConfigListener(self, port=5006):
+        def listener():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("0.0.0.0", port))
+            print(f"Config UDP listener on port: {port}")
+
+            while True:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    decoded = json.loads(data.decode())
+
+                    kx = decoded.get("kx", self.pid.kx)
+                    ky = decoded.get("ky", self.pid.ky)
+                    dt = decoded.get("dt", self.pid.dt)
+                    s1 = decoded.get("servo1offset", self.servo1.offset)
+                    s2 = decoded.get("servo2offset", self.servo2.offset)
+                    s3 = decoded.get("servo3offset", self.servo3.offset)
+                    xSign = decoded.get("xsign", self.pid.xSign)
+                    ySign = decoded.get("ysign", self.pid.ySign)
+
+
+                    #self.servo1.updateOffset(s1)
+                    #self.servo2.updateOffset(s2)
+                    #self.servo3.updateOffset(s3)
+
+                    self.pid.setKx(kx)
+                    self.pid.setKy(ky)
+                    self.pid.setDt(dt)
+                    self.pid.setXSign(xSign)
+                    self.pid.setYSign(ySign)
+
+                except Exception as e:
+                    print(f"Config Error: {e}")
         thread = threading.Thread(target=listener, daemon=True)
         thread.start()
 
@@ -183,14 +230,47 @@ class Balancer:
             time.sleep(0.01)
             print("Idling")
 
-    def balance(self,hz=20): #main control loop
+    def balance(self,hz=100): #main control loop
         self.startListener()
+        self.startConfigListener()
         delay = 1 / hz
         while True:
+
+            #print(f"Kx = {self.pid.kx}, Ky = {self.pid.ky}")
             startTime = time.time()
             with self.lock:
                 coordinates = self.coordinates
-            print("Coordinates:", coordinates)
+
+            if coordinates is None:
+                time.sleep(delay)
+                continue
+
+            try:
+                det = coordinates["det"]
+                vel = coordinates["vel"]
+                x = coordinates["x"]
+                y = coordinates["y"]
+            except Exception as e:
+                #print("Nothing to parse")
+                self.home(0.0)
+                continue
+
+            if not det:
+                self.home(0.0)
+                continue
+
+            normX = x/(480/2)
+            normY = y/(480/2)
+
+            normXVel = vel[0] / (480/2)
+            normYVel = vel[1] / (480/2)
+
+            motorAngles = self.calculateMotorAngles(normX, normY, normXVel, normYVel)
+            if motorAngles is not None:
+                print(f"Motor Angles: {motorAngles}")
+                self.setAngles(motorAngles)
+
+            print(f"x: {x:.2f}, y: {y:.2f}, det: {det}, vel: {vel}")
             time.sleep(max(0,delay-((time.time()-startTime))))
 
 

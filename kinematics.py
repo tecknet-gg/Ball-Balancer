@@ -9,7 +9,7 @@ class Kinematics:
         self.offset = offset  #to account for platform mounting offset
 
         self.heightTarget = heightTarget #target height
-        self.maxTiltLimit = 12.0 #restrictinga angular motion
+        self.maxTiltLimit = 15.0 #restricting angular motion
 
         print(f"Kinematics initialized.")
 

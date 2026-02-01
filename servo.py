@@ -23,9 +23,9 @@ class Servo:
         return count16bit
 
     def setAngle(self, angle):
-        angle = self.inputSanitation(angle)
         finalAngle = 135 + angle + self.offset
         finalAngle = max(0, min(270, finalAngle))
+        finalAngle = self.inputSanitation(finalAngle)
         count = self.angleToCount(finalAngle)
         self.pwm.channels[self.channel].duty_cycle = count
 
@@ -39,13 +39,7 @@ class Servo:
                 time.sleep(delay)
 
     def inputSanitation(self, angle):
-        if angle > 100:
-            return 100
-        elif angle < 0:
-            return 0
-        else:
-            return angle
-
+        return max(0, min(270, angle))
     def updateOffset(self, offset):
         self.offset = offset
 
