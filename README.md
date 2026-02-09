@@ -8,6 +8,9 @@ Currently working on the software. Hardware is mostly fine.
 - Networking
 - Ball Detection
 - Inverse Kinematics modelled
+- Add IMU Mount
+- Add Gradient Descent Automatic Callibration
 
 # To-Dos:
-- Implement and tune PID
+- Tune PID
+- Add 3D Files + Clean up code + GitHub
