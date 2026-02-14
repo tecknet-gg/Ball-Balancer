@@ -14,7 +14,7 @@ from camera import Camera
 from callibrate import callibrate
 import requests
 from kinematics import Kinematics
-import socket  # Add this
+import socket
 import json
 import threading
 
